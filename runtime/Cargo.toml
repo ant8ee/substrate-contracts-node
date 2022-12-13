@@ -48,6 +48,9 @@ pallet-contracts-primitives = { git = "https://github.com/paritytech/substrate",
 # Chain extension
 pallet-assets-chain-extension = { git = "https://github.com/Supercolony-net/pallet-assets-chain-extension", default-features = false, features = ["substrate"], branch = "polkadot-v0.9.32"  }
 
+dusk-poseidon = { version = "0.22.0", default-features = false }
+dusk-bls12_381 = {version = "0.8.0", default-features = false}
+
 [build-dependencies]
 substrate-wasm-builder =  { git = "https://github.com/paritytech/substrate", package = "substrate-wasm-builder" , branch = "polkadot-v0.9.32" }
 

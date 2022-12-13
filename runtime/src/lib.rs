@@ -309,6 +309,120 @@ parameter_types! {
 		.unwrap_or(RuntimeBlockWeights::get().max_block);
 	pub Schedule: pallet_contracts::Schedule<Runtime> = Default::default();
 }
+use codec::Encode;
+use frame_support::log::{
+    error,
+    trace,
+};
+use pallet_contracts::chain_extension::{
+    ChainExtension,
+    Environment,
+    Ext,
+    InitState,
+    RetVal,
+    SysConfig,
+    UncheckedFrom,
+};
+use sp_runtime::DispatchError;
+use dusk_bls12_381::BlsScalar;
+/// Contract extension for `FetchRandom`
+#[derive(Default)]
+pub struct FetchRandomExtension;
+impl FetchRandomExtension {
+pub fn bytes_to_scalar(bytes: [u8; 32]) -> BlsScalar {
+        BlsScalar(Self::bytes_to_u64(bytes))
+    }
+
+    pub fn scalar_to_bytes(scalar: BlsScalar) -> [u8; 32] {
+        Self::u64_to_bytes(*scalar.internal_repr())
+    }
+
+    pub fn bytes_to_u64(bytes: [u8; 32]) -> [u64; 4] {
+        let mut result = [0; 4];
+
+        for i in 0..result.len() {
+            let bytes_8 = bytes.split_at(i * 8).1.split_at(8).0;
+            let bytes_array = <&[u8; 8]>::try_from(bytes_8).unwrap();
+            result[i] = u64::from_be_bytes(*bytes_array);
+        }
+
+        result
+    }
+
+    pub fn u64_to_bytes(array: [u64; 4]) -> [u8; 32] {
+        let mut result = [0; 32];
+
+        for i in 0..array.len() {
+            let bytes_array = array[i].to_be_bytes();
+            for j in 0..bytes_array.len() {
+                result[i * 8 + j] = bytes_array[j];
+            }
+        }
+
+        result
+    }
+    pub fn hash5(array: [[u8; 32];5]) -> [u8;32] {
+        let array: Vec<BlsScalar> = array
+            .into_iter()
+            .map(|a| Self::bytes_to_scalar(a))
+            .collect();
+        let result = dusk_poseidon::sponge::hash(&array);
+
+        Self::scalar_to_bytes(result)
+    }
+
+}
+impl ChainExtension<Runtime> for FetchRandomExtension {
+    fn call<E: Ext>(
+        &mut self,
+        env: Environment<E, InitState>,
+    ) -> Result<RetVal, DispatchError>
+    where
+        <E::T as SysConfig>::AccountId:
+            UncheckedFrom<<E::T as SysConfig>::Hash> + AsRef<[u8]>,
+    {
+        let func_id = env.func_id();
+        match func_id {
+            1101 => {
+                let mut env = env.buf_in_buf_out();
+                let arg: [u8; 32] = env.read_as()?;
+                let random_seed = crate::RandomnessCollectiveFlip::random(&arg).0;
+                let random_slice = random_seed.encode();
+                trace!(
+                    target: "runtime",
+                    "[ChainExtension]|call|func_id:{:}",
+                    func_id
+                );
+                env.write(&random_slice, false, None).map_err(|_| {
+                    DispatchError::Other("ChainExtension failed to call random")
+                })?;
+            }
+            1111 => {
+                let mut env = env.buf_in_buf_out();
+                let arg: [[u8; 32];5] = env.read_as()?;
+                let random_seed = Self::hash5(arg);
+                // let random_slice = random_seed.encode();
+                trace!(
+                    target: "runtime",
+                    "[ChainExtension]|call|func_id:{:}",
+                    func_id
+                );
+                env.write(&random_seed, false, None).map_err(|_| {
+                    DispatchError::Other("ChainExtension failed to call random")
+                })?;
+            }
+            _ => {
+                error!("Called an unregistered `func_id`: {:}", func_id);
+                return Err(DispatchError::Other("Unimplemented func_id"))
+            }
+        }
+        Ok(RetVal::Converging(0))
+    }
+ 
+    fn enabled() -> bool {
+        true
+    }
+}
 
 impl pallet_contracts::Config for Runtime {
 	type Time = Timestamp;
@@ -328,7 +442,7 @@ impl pallet_contracts::Config for Runtime {
 	type CallStack = [pallet_contracts::Frame<Self>; 31];
 	type WeightPrice = pallet_transaction_payment::Pallet<Self>;
 	type WeightInfo = pallet_contracts::weights::SubstrateWeight<Self>;
-	type ChainExtension = pallet_assets_chain_extension::substrate::AssetsExtension;
+	// type ChainExtension = pallet_assets_chain_extension::substrate::AssetsExtension;
 	type DeletionQueueDepth = DeletionQueueDepth;
 	type DeletionWeightLimit = DeletionWeightLimit;
 	type Schedule = Schedule;
@@ -343,6 +457,7 @@ impl pallet_contracts::Config for Runtime {
 	// just more lax.
 	type MaxCodeLen = ConstU32<{ 256 * 1024 }>;
 	type MaxStorageKeyLen = ConstU32<128>;
+    type ChainExtension = FetchRandomExtension;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
